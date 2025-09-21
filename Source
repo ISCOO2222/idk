@@ -1,1 +1,554 @@
-print("hello")
+-- geek hub
+-- Paste this as a LocalScript in StarterPlayerScripts (exploit environment assumptions:
+-- firetouchinterest, readfile, writefile available)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local settingsKey = "FF2_Settings_v3"
+
+local settings = {
+    magnet = true,
+    autoCatch = true,
+    freezeTech = false,
+    freezeTime = 2,
+    esp = true,
+    path = true,
+    range = 80,
+    angleEnhancer = true,
+    jumpBoostToggle = false,
+    jumpBoostValue = 50,
+    catchWindow = 6,
+    pullSmoothness = 0.55,    -- 0..1
+    reactionMin = 0.02,       -- seconds
+    reactionMax = 0.06,       -- seconds
+    magnetVisual = "Sphere"
+}
+
+-- Load saved settings (safe)
+pcall(function()
+    if readfile and isfile and isfile(settingsKey) then
+        local raw = readfile(settingsKey)
+        if raw and #raw > 0 then
+            local ok, parsed = pcall(HttpService.JSONDecode, HttpService, raw)
+            if ok and type(parsed) == "table" then
+                for k,v in pairs(parsed) do settings[k] = v end
+            end
+        end
+    end
+end)
+
+local function saveSettings()
+    pcall(function()
+        if writefile then
+            writefile(settingsKey, HttpService:JSONEncode(settings))
+        end
+    end)
+end
+
+-- GUI Creation (draggable)
+local gui = Instance.new("ScreenGui")
+gui.Name = "FF2_GUI"
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 999
+-- Exploit environments often require CoreGui; fallback to PlayerGui if CoreGui restricted
+if typeof(game.CoreGui) == "Instance" then
+    gui.Parent = game.CoreGui
+else
+    gui.Parent = player:WaitForChild("PlayerGui")
+end
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 320, 0, 620)
+frame.Position = UDim2.new(0, 8, 0, 8)
+frame.BackgroundColor3 = Color3.fromRGB(0, 100, 0)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "GeekHub"
+title.TextColor3 = Color3.fromRGB(150, 0, 0)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.Parent = frame
+
+local yOffset = 36
+local function createToggle(name, default, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -12, 0, 30)
+    btn.Position = UDim2.new(0, 6, 0, yOffset)
+    btn.Text = name .. ": " .. (default and "ON" or "OFF")
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.BorderSizePixel = 0
+    btn.Parent = frame
+
+    btn.MouseButton1Click:Connect(function()
+        default = not default
+        btn.Text = name .. ": " .. (default and "ON" or "OFF")
+        callback(default)
+        saveSettings()
+    end)
+
+    yOffset = yOffset + 36
+    return btn
+end
+
+local function createSliderBox(name, initialValue, minVal, maxVal, callback)
+    local box = Instance.new("TextBox")
+    box.Position = UDim2.new(0, 6, 0, yOffset)
+    box.Size = UDim2.new(1, -12, 0, 30)
+    box.Text = name .. ": " .. tostring(initialValue)
+    box.BackgroundColor3 = Color3.fromRGB(45,45,45)
+    box.TextColor3 = Color3.fromRGB(255,255,255)
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 14
+    box.ClearTextOnFocus = true
+    box.BorderSizePixel = 0
+    box.Parent = frame
+
+    box.FocusLost:Connect(function(enter)
+        if not enter then
+            box.Text = name .. ": " .. tostring(initialValue)
+            return
+        end
+        local found = box.Text:match("(-?%d+%.?%d*)")
+        local val = tonumber(found)
+        if val then
+            val = math.clamp(val, minVal, maxVal)
+            initialValue = val
+            box.Text = name .. ": " .. tostring(val)
+            callback(val)
+            saveSettings()
+        else
+            box.Text = name .. ": " .. tostring(initialValue)
+        end
+    end)
+
+    yOffset = yOffset + 36
+    return box
+end
+
+local function createDropdown(name, options, default, callback)
+    local label = Instance.new("TextLabel")
+    label.Position = UDim2.new(0, 6, 0, yOffset)
+    label.Size = UDim2.new(1, -12, 0, 20)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.new(1,1,1)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 14
+    label.Parent = frame
+    yOffset = yOffset + 20
+
+    local dropdownFrame = Instance.new("Frame")
+    dropdownFrame.Position = UDim2.new(0, 6, 0, yOffset)
+    dropdownFrame.Size = UDim2.new(1, -12, 0, 30)
+    dropdownFrame.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    dropdownFrame.BorderSizePixel = 0
+    dropdownFrame.Parent = frame
+
+    local selectedLabel = Instance.new("TextLabel")
+    selectedLabel.Size = UDim2.new(1, -20, 1, 0)
+    selectedLabel.Position = UDim2.new(0, 10, 0, 0)
+    selectedLabel.BackgroundTransparency = 1
+    selectedLabel.TextColor3 = Color3.new(1,1,1)
+    selectedLabel.Font = Enum.Font.Gotham
+    selectedLabel.TextSize = 14
+    selectedLabel.Text = default
+    selectedLabel.Parent = dropdownFrame
+
+    local open = false
+    local optionsFrame
+
+    local function closeOptions()
+        if optionsFrame then
+            optionsFrame:Destroy()
+            optionsFrame = nil
+        end
+        open = false
+    end
+
+    dropdownFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if open then
+                closeOptions()
+            else
+                open = true
+                optionsFrame = Instance.new("Frame")
+                optionsFrame.Size = UDim2.new(1, -12, 0, #options * 28)
+                optionsFrame.Position = UDim2.new(0, 6, 0, yOffset + 35)
+                optionsFrame.BackgroundColor3 = Color3.fromRGB(35,35,35)
+                optionsFrame.BorderSizePixel = 0
+                optionsFrame.ZIndex = 10
+                optionsFrame.Parent = frame
+
+                for i, option in ipairs(options) do
+                    local optBtn = Instance.new("TextButton")
+                    optBtn.Size = UDim2.new(1, 0, 0, 28)
+                    optBtn.Position = UDim2.new(0, 0, 0, (i-1)*28)
+                    optBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+                    optBtn.TextColor3 = Color3.new(1,1,1)
+                    optBtn.Font = Enum.Font.Gotham
+                    optBtn.TextSize = 14
+                    optBtn.Text = option
+                    optBtn.BorderSizePixel = 0
+                    optBtn.Parent = optionsFrame
+
+                    optBtn.MouseButton1Click:Connect(function()
+                        selectedLabel.Text = option
+                        callback(option)
+                        saveSettings()
+                        closeOptions()
+                    end)
+                end
+            end
+        end
+    end)
+
+    yOffset = yOffset + (#options * 28) + 38
+    return dropdownFrame
+end
+
+-- Create all toggles and sliders
+createToggle("Magnet", settings.magnet, function(v) settings.magnet = v end)
+createToggle("Auto Catch", settings.autoCatch, function(v) settings.autoCatch = v end)
+createToggle("Freeze Tech", settings.freezeTech, function(v) settings.freezeTech = v end)
+createToggle("Ball ESP", settings.esp, function(v)
+    settings.esp = v
+    -- remove highlight when turned off
+    local ball = Workspace:FindFirstChild("Football")
+    if ball then
+        local hf = ball:FindFirstChild("FF2Highlight")
+        if hf and not settings.esp then hf:Destroy() end
+    end
+end)
+createToggle("Ball Path", settings.path, function(v) settings.path = v end)
+createToggle("Angle Enhancer", settings.angleEnhancer, function(v) settings.angleEnhancer = v end)
+createToggle("Jump Boost (Safe)", settings.jumpBoostToggle, function(v) settings.jumpBoostToggle = v end)
+
+createSliderBox("Magnet Range", settings.range, 5, 140, function(v) settings.range = v end)
+createSliderBox("Catch Window", settings.catchWindow, 1, 40, function(v) settings.catchWindow = v end)
+createSliderBox("Pull Smoothness (0-100)", math.floor(settings.pullSmoothness*100), 1, 100, function(v) settings.pullSmoothness = v/100 end)
+createSliderBox("Jump Boost (50 = none)", settings.jumpBoostValue, 50, 180, function(v) settings.jumpBoostValue = v end)
+createSliderBox("Reaction Min ms", math.floor(settings.reactionMin*1000), 0, 500, function(v) settings.reactionMin = v/1000 end)
+createSliderBox("Reaction Max ms", math.floor(settings.reactionMax*1000), 60, 1000, function(v) settings.reactionMax = v/1000 end)
+createSliderBox("Freeze Time (s)", settings.freezeTime, 1, 5, function(v) settings.freezeTime = v end)
+
+local magnetVisualDropdown = createDropdown("Magnet Visual", {"Off","Sphere","Box"}, settings.magnetVisual, function(v)
+    settings.magnetVisual = v
+end)
+
+-- Toggle GUI visibility with B key
+local guiVisible = true
+UserInputService.InputBegan:Connect(function(inp, proc)
+    if not proc and inp.UserInputType == Enum.UserInputType.Keyboard and inp.KeyCode == Enum.KeyCode.k then
+        guiVisible = not guiVisible
+        frame.Visible = guiVisible
+    end
+end)
+
+-- Helpers
+local function safeUnit(v)
+    if v.Magnitude == 0 then return Vector3.new(0,0,0) end
+    return v.Unit
+end
+
+local function isFacingTarget(hrpCFrame, targetPos)
+    local lookVector = hrpCFrame.LookVector
+    local dir = (targetPos - hrpCFrame.Position)
+    if dir.Magnitude == 0 then return true end
+    return lookVector:Dot(dir.Unit) > 0.2
+end
+
+-- Predict time of closest approach and predicted position
+local function predictClosestApproach(hrpPos, ballPos, ballVel)
+    local rel = ballPos - hrpPos
+    local v2 = ballVel:Dot(ballVel)
+    if v2 <= 0.001 then
+        return 0, ballPos
+    end
+    local t_ca = - ballVel:Dot(rel) / v2
+    if t_ca < 0 then t_ca = 0 end
+    if t_ca > 1.4 then t_ca = 1.4 end
+    local predicted = ballPos + ballVel * t_ca
+    return t_ca, predicted
+end
+
+local function randDelay()
+    local a = settings.reactionMin or 0
+    local b = settings.reactionMax or a
+    if b < a then b = a end
+    return a + math.random() * (b - a)
+end
+
+local function doFireTouch(ball, hand)
+    pcall(function()
+        firetouchinterest(ball, hand, 0)
+        task.wait(0.004 + math.random() * 0.003)
+        firetouchinterest(ball, hand, 1)
+    end)
+end
+
+-- ESP Highlight on ball (only create/destroy when toggled)
+RunService.RenderStepped:Connect(function()
+    if not settings.esp then return end
+    local ball = Workspace:FindFirstChild("Football")
+    if ball and not ball:FindFirstChild("FF2Highlight") then
+        local hf = Instance.new("Highlight")
+        hf.Name = "FF2Highlight"
+        hf.Adornee = ball
+        hf.FillColor = Color3.fromRGB(255, 220, 0)
+        hf.OutlineColor = Color3.fromRGB(255, 80, 80)
+        hf.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hf.Parent = ball
+    end
+end)
+
+-- Magnet Visual parts (managed and reused)
+local magnetVisualSphere
+local magnetVisualBox
+
+local function clearMagnetVisuals()
+    if magnetVisualSphere then magnetVisualSphere:Destroy() magnetVisualSphere = nil end
+    if magnetVisualBox then magnetVisualBox:Destroy() magnetVisualBox = nil end
+end
+
+local function createVisualsForHRP(hrp)
+    clearMagnetVisuals()
+    if not hrp then return end
+
+    if settings.magnetVisual == "Sphere" then
+        magnetVisualSphere = Instance.new("Part")
+        magnetVisualSphere.Name = "MagnetVisualSphere"
+        magnetVisualSphere.Shape = Enum.PartType.Ball
+        magnetVisualSphere.Anchored = true
+        magnetVisualSphere.CanCollide = false
+        magnetVisualSphere.Transparency = 0
+        magnetVisualSphere.Material = Enum.Material.Neon
+        magnetVisualSphere.Color = Color3.fromRGB(100, 200, 255)
+        magnetVisualSphere.CastShadow = false
+        magnetVisualSphere.Parent = Workspace
+        magnetVisualSphere.Size = Vector3.new(settings.range*2, settings.range*2, settings.range*2)
+    elseif settings.magnetVisual == "Box" then
+        magnetVisualBox = Instance.new("Part")
+        magnetVisualBox.Name = "MagnetVisualBox"
+        magnetVisualBox.Anchored = true
+        magnetVisualBox.CanCollide = false
+        magnetVisualBox.Transparency = 0.1
+        magnetVisualBox.Material = Enum.Material.Neon
+        magnetVisualBox.Color = Color3.fromRGB(100, 200, 255)
+        magnetVisualBox.CastShadow = false
+        magnetVisualBox.Parent = Workspace
+        magnetVisualBox.Size = Vector3.new(settings.range*2, settings.range*2, settings.range*2)
+    end
+end
+
+-- Box containment check: returns true if point is inside axis-aligned box centered at hrp with half extents
+local function pointInBox(centerCFrame, halfExtents, pointWorld)
+    local relative = centerCFrame:PointToObjectSpace(pointWorld)
+    local hx, hy, hz = halfExtents.X, halfExtents.Y, halfExtents.Z
+    return math.abs(relative.X) <= hx and math.abs(relative.Y) <= hy and math.abs(relative.Z) <= hz
+end
+
+-- Safe Jump Boost
+do
+    local lastJump = 0
+    UserInputService.JumpRequest:Connect(function()
+        local char = player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChild("Humanoid")
+        if not (hrp and hum) then return end
+        if settings.jumpBoostToggle and tick() - lastJump > 0.08 then
+            lastJump = tick()
+            task.delay(0.04, function()
+                if hrp and hrp.Parent then
+                    local extra = settings.jumpBoostValue - 50
+                    if extra > 0 then
+                        -- Add to velocity safely (clamped)
+                        local v = hrp.Velocity
+                        v = Vector3.new(v.X, math.clamp(v.Y + extra, -200, 200), v.Z)
+                        hrp.Velocity = v
+                    end
+                end
+            end)
+        end
+    end)
+
+    RunService.RenderStepped:Connect(function()
+        local char = player.Character
+        if char and char:FindFirstChild("Humanoid") then
+            -- Keep default jump power set safely
+            char.Humanoid.JumpPower = 50
+        end
+    end)
+end
+
+-- MAIN ULTRA OP MAGNET LOOP (improved)
+task.spawn(function()
+    local lastCatch = 0
+    local lastVisualHRP = nil
+
+    while true do
+        RunService.Heartbeat:Wait()
+
+        local char = player.Character
+        if not (char and char.Parent) then
+            clearMagnetVisuals()
+            task.wait(0.25)
+            continue
+        end
+
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            clearMagnetVisuals()
+            task.wait(0.25)
+            continue
+        end
+
+        -- update visuals if needed
+        if settings.magnetVisual ~= "Off" and lastVisualHRP ~= hrp then
+            createVisualsForHRP(hrp)
+            lastVisualHRP = hrp
+        end
+
+        if magnetVisualSphere then
+            magnetVisualSphere.CFrame = hrp.CFrame
+            magnetVisualSphere.Size = Vector3.new(settings.range*2, settings.range*2, settings.range*2)
+            magnetVisualSphere.Transparency = 10
+        end
+        if magnetVisualBox then
+            magnetVisualBox.CFrame = hrp.CFrame
+            magnetVisualBox.Size = Vector3.new(settings.range*2, settings.range*2, settings.range*2)
+            magnetVisualBox.Transparency = 10
+        end
+
+        if not (settings.magnet or settings.autoCatch) then
+            task.wait(0.05)
+            continue
+        end
+
+        local ball = Workspace:FindFirstChild("Football")
+        if not ball then
+            task.wait(0.02)
+            continue
+        end
+
+        local now = tick()
+        local ballVel = ball.AssemblyLinearVelocity or ball.Velocity or Vector3.new(0,0,0)
+        local ballPos = ball.Position
+
+        -- Predict position using closest approach time
+        local _, predictedPos = predictClosestApproach(hrp.Position, ballPos, ballVel)
+        local distPredicted = (predictedPos - hrp.Position).Magnitude
+        local distCurrent = (ballPos - hrp.Position).Magnitude
+
+        local facing = true
+        if settings.angleEnhancer then
+            facing = isFacingTarget(hrp.CFrame, ballPos)
+        end
+
+        -- respect random reaction delay (debounce)
+        local reactionDelay = randDelay()
+        if now - lastCatch < reactionDelay then
+            -- still waiting for reaction window
+            continue
+        end
+
+        if facing then
+            -- determine if ball is inside magnet area (sphere or box)
+            local insideMagnet = false
+            if settings.magnetVisual == "Box" then
+                local half = Vector3.new(settings.range, settings.range, settings.range)
+                insideMagnet = pointInBox(hrp.CFrame, half, ballPos)
+            else
+                -- sphere or default
+                insideMagnet = distPredicted <= settings.range or distCurrent <= settings.range
+            end
+
+            if settings.magnet and insideMagnet then
+                -- Pull strength based on predicted distance (closer -> stronger)
+                local direction = safeUnit((hrp.Position + Vector3.new(0,2,0)) - ballPos) -- pull towards upper HRP
+                local pullStrength = math.clamp((settings.range - distPredicted) / settings.range, 0, 1)
+                local basePullPower = 1400 -- tuned: less extreme teleportation, still strong
+                local targetVelocity = direction * (basePullPower * pullStrength)
+
+                -- smooth lerp of velocity
+                local currentVel = ball.Velocity or Vector3.new(0,0,0)
+                local smooth = math.clamp(settings.pullSmoothness, 0.01, 0.99)
+                local newVel = Vector3.new(
+                    currentVel.X + (targetVelocity.X - currentVel.X) * smooth,
+                    currentVel.Y + (targetVelocity.Y - currentVel.Y) * smooth,
+                    currentVel.Z + (targetVelocity.Z - currentVel.Z) * smooth
+                )
+                -- clamp final velocity to reasonable range to avoid weird physics
+                local maxVel = 3000
+                if newVel.Magnitude > maxVel then
+                    newVel = newVel.Unit * maxVel
+                end
+
+                -- Apply velocity change safely
+                pcall(function()
+                    ball.Velocity = newVel
+                end)
+
+                -- gently nudge position toward HRP (small lerp) to help catches without teleporting
+                pcall(function()
+                    ball.Position = ball.Position:Lerp(hrp.Position + Vector3.new(0,2,0), smooth * math.clamp(pullStrength, 0.05, 0.9))
+                end)
+
+                -- Firetouch spam (spawned so it doesn't stall)
+                for _, handName in ipairs({"CatchLeft", "CatchRight"}) do
+                    local hand = char:FindFirstChild(handName)
+                    if hand then
+                        task.spawn(function()
+                            for i=1, settings.catchWindow do
+                                doFireTouch(ball, hand)
+                                task.wait(0.002)
+                            end
+                        end)
+                    end
+                end
+
+                lastCatch = now
+
+                -- Freeze tech (anchor HRP briefly) — only anchor if extremely close and toggle on
+                if settings.freezeTech and not hrp.Anchored and distCurrent <= 3 then
+                    hrp.Anchored = true
+                    task.delay(settings.freezeTime, function()
+                        if hrp and hrp.Parent then
+                            hrp.Anchored = false
+                        end
+                    end)
+                end
+
+            elseif settings.autoCatch and distCurrent <= 5 then
+                -- Auto-catch when ball is very close (no pulling)
+                for _, handName in ipairs({"CatchLeft", "CatchRight"}) do
+                    local hand = char:FindFirstChild(handName)
+                    if hand then
+                        task.spawn(function()
+                            for i=1, settings.catchWindow do
+                                doFireTouch(ball, hand)
+                                task.wait(0.002)
+                            end
+                        end)
+                    end
+                end
+                lastCatch = now
+            end
+        end
+    end
+end)
